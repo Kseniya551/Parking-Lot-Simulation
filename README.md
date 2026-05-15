@@ -1,3 +1,3 @@
 # Parking-Lot-Simulation
 
-נכתב בC++ בVISUAL STUDIO
+נכתב בC בVISUAL STUDIO
