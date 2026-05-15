@@ -1,0 +1,566 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>      // For time management
+#include <string.h>    // For string operations
+#include <windows.h>   // For Sleep and system("cls") on Windows. For Linux/macOS, use unistd.h and system("clear")
+#include <math.h>      // For ceil in calculateParkingFee
+
+// Define constants for parking lot dimensions and prices
+#define INITIAL_ROWS 3
+#define INITIAL_COLS 3
+
+#define PRICE_FIRST_HOUR 20
+#define PRICE_TWO_HOURS 35
+#define PRICE_QUARTER_HOUR 5
+
+// --- Struct Definitions ---
+
+// Structure to represent a single parking spot
+typedef struct ParkingSpot {
+    int id;           // Unique ID for the spot
+    int isOccupied;   // 0 for empty, 1 for occupied
+    time_t entryTime; // Time when the car entered (seconds since epoch)
+} ParkingSpot;
+
+// Structure to represent the entire parking lot
+typedef struct ParkingLot {
+    ParkingSpot* spots;   // Dynamic array of ParkingSpot
+    int rows;             // Current number of rows
+    int cols;             // Current number of columns
+    int totalSpots;       // Total number of spots (rows * cols)
+    double ownerMoney;    // Money accumulated by the parking lot owner
+} ParkingLot;
+
+// --- Function Prototypes ---
+
+// Basic UI and display functions
+void displayParkingLot(const ParkingLot* parkingLot);
+void clearScreen();
+void displayMenu();
+void displayPricing();
+
+// Parking lot management functions
+void initializeParkingLot(ParkingLot* parkingLot, int rows, int cols);
+void freeParkingLot(ParkingLot* parkingLot);
+int findEmptySpot(const ParkingLot* parkingLot);
+void parkCar(ParkingLot* parkingLot);
+void exitCar(ParkingLot* parkingLot);
+double calculateParkingFee(time_t entryTime);
+int getOccupiedSpotCount(const ParkingLot* parkingLot); // Helper to count occupied spots
+
+// Time simulation functions
+time_t getCurrentSimulatedTime();
+void advanceSimulatedTime(int secondsToAdvance);
+
+// File I/O functions
+void saveParkingLot(const ParkingLot* parkingLot);
+int loadParkingLot(ParkingLot* parkingLot); // Returns 1 on success, 0 on failure
+
+// Upgrade functions
+void checkAndOfferUpgrade(ParkingLot* parkingLot);
+void upgradeParkingLot(ParkingLot* parkingLot, int newRows, int newCols, double upgradeCost);
+
+// Helper function for "moneymoney" cheat
+void applyMoneyCheat(ParkingLot* parkingLot);
+
+// Input validation helper (using fgets for robustness)
+int getIntegerInput(const char* prompt);
+
+// Global variable for simulated time (for simplicity in this example)
+time_t simulatedTime;
+
+int main() {
+    ParkingLot parkingLot;
+    // Initialize parkingLot->spots to NULL and totalSpots to 0
+    // so freeParkingLot doesn't try to free uninitialized memory
+    parkingLot.spots = NULL;
+    parkingLot.totalSpots = 0;
+    parkingLot.ownerMoney = 0.0; // Ensure initial money is 0
+
+    int choice;
+    char inputBuffer[50]; // Buffer for user input including cheat code
+    int loadOption;
+    char timeBuffer[26]; // Buffer for ctime_s output
+
+    // Initialize simulated time
+    simulatedTime = time(NULL); // Start with current real time
+
+    clearScreen();
+    printf("Welcome to My Smart Parking Lot System!\n");
+    printf("Do you want to (1) Create a new parking lot or (2) Load saved data? ");
+
+    char tempLoadOptionBuffer[10];
+    if (fgets(tempLoadOptionBuffer, sizeof(tempLoadOptionBuffer), stdin) != NULL) {
+        tempLoadOptionBuffer[strcspn(tempLoadOptionBuffer, "\n")] = 0; // Remove newline
+        loadOption = atoi(tempLoadOptionBuffer);
+    }
+    else {
+        loadOption = 0; // Default to create new if input fails
+    }
+
+    if (loadOption == 2) {
+        if (loadParkingLot(&parkingLot)) { // Try to load
+            printf("Loaded previous parking lot state.\n");
+            simulatedTime = time(NULL); // Reset simulated time to current real time upon load
+            Sleep(1000);
+        }
+        else { // If load fails, initialize new
+            printf("No saved data found or unable to load. Initializing a new parking lot.\n");
+            initializeParkingLot(&parkingLot, INITIAL_ROWS, INITIAL_COLS);
+            Sleep(1000);
+        }
+    }
+    else { // Default to new parking lot if input is not 2 or invalid
+        printf("Initializing a new parking lot.\n");
+        initializeParkingLot(&parkingLot, INITIAL_ROWS, INITIAL_COLS);
+        Sleep(1000);
+    }
+
+    do {
+        clearScreen();
+        ctime_s(timeBuffer, sizeof(timeBuffer), &simulatedTime);
+        printf("Current Simulated Time: %s", timeBuffer); // Display simulated time
+        printf("Parking Lot Owner's Money: %.2f NIS\n", parkingLot.ownerMoney);
+        displayParkingLot(&parkingLot);
+        displayMenu();
+
+        printf("Enter your choice: ");
+        if (fgets(inputBuffer, sizeof(inputBuffer), stdin) == NULL) {
+            printf("Error reading input. Exiting.\n");
+            choice = 0; // Force exit
+            continue;
+        }
+        inputBuffer[strcspn(inputBuffer, "\n")] = 0; // Remove trailing newline if present
+
+        if (strcmp(inputBuffer, "moneymoney") == 0) {
+            applyMoneyCheat(&parkingLot);
+            continue; // Skip menu processing for this iteration
+        }
+
+        choice = atoi(inputBuffer);
+
+        switch (choice) {
+        case 1: // Park Car
+            parkCar(&parkingLot);
+            break;
+        case 2: // Exit Car
+            exitCar(&parkingLot);
+            break;
+        case 3: // Save Parking Lot
+            saveParkingLot(&parkingLot);
+            printf("Parking lot state saved successfully!\n");
+            Sleep(1500);
+            break;
+        case 4: // Check for Upgrades
+            checkAndOfferUpgrade(&parkingLot);
+            break;
+        case 5: // Advance Time (for testing/simulation)
+            printf("Advancing simulated time by 1 hour \n");
+            advanceSimulatedTime(3600); // Advance by 1 hour
+            Sleep(1000);
+            break;
+        case 6: // Display Pricing
+            displayPricing();
+            Sleep(5000);
+            break;
+        case 0: // Exit
+            printf("Exiting program. Do you want to save the current state? (y/n): ");
+            char saveChoice;
+            scanf_s(" %c", &saveChoice, 1);
+            while (getchar() != '\n'); // Clear the input buffer
+
+            if (saveChoice == 'y' || saveChoice == 'Y') {
+                saveParkingLot(&parkingLot);
+                printf("Parking lot state saved.\n");
+            }
+            printf("Goodbye!\n");
+            Sleep(1500);
+            break;
+        default:
+            printf("Invalid choice. Please enter a number between 0 and 6, or 'moneymoney'.\n");
+            Sleep(2000);
+            break;
+        }
+
+        advanceSimulatedTime(5); // Advance by 5 real seconds per loop iteration
+
+    } while (choice != 0);
+
+    freeParkingLot(&parkingLot); // Clean up dynamically allocated memory
+    return 0;
+}
+
+// --- Function Implementations ---
+
+void clearScreen() {
+    system("cls"); // For Windows. Use "clear" for Linux/macOS.
+}
+
+void displayParkingLot(const ParkingLot* parkingLot) {
+    int occupiedCount = getOccupiedSpotCount(parkingLot);
+    printf("\n--- Parking Lot Layout ---\n");
+    for (int i = 0; i < parkingLot->rows; i++) {
+        for (int j = 0; j < parkingLot->cols; j++) {
+            int index = i * parkingLot->cols + j;
+            if (parkingLot->spots[index].isOccupied) {
+                printf("\033[0;31m[X]\033[0m "); // Red for occupied
+            }
+            else {
+                printf("\033[0;32m[ ]\033[0m "); // Green for empty
+            }
+        }
+        printf("\n");
+    }
+    printf("--------------------------\n");
+    printf("X = Occupied, [ ] = Empty\n");
+    printf("Total spots: %d, Occupied: %d, Empty: %d\n",
+        parkingLot->totalSpots,
+        occupiedCount,
+        parkingLot->totalSpots - occupiedCount);
+}
+
+void displayMenu() {
+    printf("\n--- Parking Lot Menu ---\n");
+    printf("1. Park a car\n");
+    printf("2. Exit a car\n");
+    printf("3. Save parking lot state\n");
+    printf("4. Check for upgrades\n");
+    printf("5. Advance simulated time (for testing)\n");
+    printf("6. Display pricing information\n");
+    printf("0. Exit\n");
+}
+
+void displayPricing() {
+    printf("\n--- Parking Pricing ---\n");
+    printf("First hour: %d NIS\n", PRICE_FIRST_HOUR);
+    printf("First two hours: %d NIS\n", PRICE_TWO_HOURS);
+    printf("Every additional quarter hour: %d NIS\n", PRICE_QUARTER_HOUR);
+    printf("------------------------\n");
+}
+
+void initializeParkingLot(ParkingLot* parkingLot, int rows, int cols) {
+    // Ensure existing memory is freed before re-allocating
+    freeParkingLot(parkingLot);
+
+    parkingLot->rows = rows;
+    parkingLot->cols = cols;
+    parkingLot->totalSpots = rows * cols;
+    parkingLot->ownerMoney = 0.0; // Initial money for owner only when initializing a NEW lot
+
+    parkingLot->spots = (ParkingSpot*)malloc(sizeof(ParkingSpot) * parkingLot->totalSpots);
+    if (parkingLot->spots == NULL) {
+        perror("Failed to allocate memory for parking spots");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < parkingLot->totalSpots; i++) {
+        parkingLot->spots[i].id = i + 1;
+        parkingLot->spots[i].isOccupied = 0; // All spots are initially empty
+        parkingLot->spots[i].entryTime = 0;
+    }
+}
+
+void freeParkingLot(ParkingLot* parkingLot) {
+    if (parkingLot->spots != NULL) {
+        free(parkingLot->spots);
+        parkingLot->spots = NULL;
+    }
+}
+
+int findEmptySpot(const ParkingLot* parkingLot) {
+    for (int i = 0; i < parkingLot->totalSpots; i++) {
+        if (!parkingLot->spots[i].isOccupied) {
+            return i;
+        }
+    }
+    return -1; // Parking lot is full
+}
+
+int getOccupiedSpotCount(const ParkingLot* parkingLot) {
+    int count = 0;
+    for (int i = 0; i < parkingLot->totalSpots; i++) {
+        if (parkingLot->spots[i].isOccupied) {
+            count++;
+        }
+    }
+    return count;
+}
+
+void parkCar(ParkingLot* parkingLot) {
+    int spotIndex = findEmptySpot(parkingLot);
+    if (spotIndex != -1) {
+        parkingLot->spots[spotIndex].isOccupied = 1;
+        parkingLot->spots[spotIndex].entryTime = getCurrentSimulatedTime();
+        printf("Car parked successfully at spot %d.\n", parkingLot->spots[spotIndex].id);
+        Sleep(1000); // Pause to show message
+    }
+    else {
+        printf("Sorry, parking lot is full.\n");
+        Sleep(1000); // Pause to show message
+    }
+}
+
+void exitCar(ParkingLot* parkingLot) {
+    int occupiedCount = getOccupiedSpotCount(parkingLot);
+
+    if (occupiedCount == 0) {
+        printf("No cars in the parking lot to exit.\n");
+        Sleep(1500);
+        return;
+    }
+
+    int spotId;
+    printf("Enter the ID of the spot to exit (1-%d): ", parkingLot->totalSpots);
+    spotId = getIntegerInput(""); // Use getIntegerInput here
+
+    if (spotId < 1 || spotId > parkingLot->totalSpots) {
+        printf("Invalid spot ID.\n");
+        Sleep(1000);
+        return;
+    }
+
+    int index = spotId - 1;
+    if (parkingLot->spots[index].isOccupied) {
+        time_t exitTime = getCurrentSimulatedTime();
+        double fee = calculateParkingFee(parkingLot->spots[index].entryTime);
+
+        printf("Car at spot %d exited. Parking fee: %.2f NIS\n", spotId, fee);
+        parkingLot->ownerMoney += fee; // Add fee to owner's money
+        parkingLot->spots[index].isOccupied = 0; // Mark spot as empty
+        parkingLot->spots[index].entryTime = 0; // Reset entry time
+        Sleep(2000); // Pause to show message
+    }
+    else {
+        printf("Spot %d is already empty.\n", spotId);
+        Sleep(1000);
+    }
+}
+
+double calculateParkingFee(time_t entryTime) {
+    time_t currentTime = getCurrentSimulatedTime();
+    double durationSeconds = difftime(currentTime, entryTime);
+    double durationMinutes = durationSeconds / 60.0; // Convert to minutes
+
+    displayPricing(); // Show pricing to the user for context
+
+    if (durationMinutes <= 60) { // First hour
+        return PRICE_FIRST_HOUR;
+    }
+    else if (durationMinutes <= 120) { // First two hours
+        return PRICE_TWO_HOURS;
+    }
+    else { // More than two hours
+        double fee = PRICE_TWO_HOURS;
+        double remainingMinutes = durationMinutes - 120;
+        // Calculate additional quarters
+        int additionalQuarters = (int)ceil(remainingMinutes / 15.0); // Use ceil to round up to nearest quarter
+        fee += additionalQuarters * PRICE_QUARTER_HOUR;
+        return fee;
+    }
+}
+
+time_t getCurrentSimulatedTime() {
+    return simulatedTime;
+}
+
+void advanceSimulatedTime(int realSecondsToAdvance) {
+    simulatedTime += realSecondsToAdvance;
+}
+
+// --- MODIFIED SAVE FUNCTION ---
+void saveParkingLot(const ParkingLot* parkingLot) {
+    FILE* file = fopen("parking_lot_state.bin", "wb");
+    if (file == NULL) {
+        perror("Error opening file for saving");
+        return;
+    }
+
+    // Write parking lot dimensions and owner money
+    fwrite(&parkingLot->rows, sizeof(int), 1, file);
+    fwrite(&parkingLot->cols, sizeof(int), 1, file);
+    fwrite(&parkingLot->ownerMoney, sizeof(double), 1, file);
+
+    // Loop through each ParkingSpot and write its members individually
+    // This avoids padding issues that might occur when writing/reading the entire struct
+    for (int i = 0; i < parkingLot->totalSpots; i++) {
+        fwrite(&parkingLot->spots[i].id, sizeof(int), 1, file);
+        fwrite(&parkingLot->spots[i].isOccupied, sizeof(int), 1, file);
+        fwrite(&parkingLot->spots[i].entryTime, sizeof(time_t), 1, file);
+    }
+
+    fclose(file);
+}
+
+// --- MODIFIED LOAD FUNCTION ---
+int loadParkingLot(ParkingLot* parkingLot) {
+    FILE* file = fopen("parking_lot_state.bin", "rb");
+    if (file == NULL) {
+        return 0; // File not found or error opening
+    }
+
+    int loadedRows, loadedCols;
+    double loadedMoney;
+
+    // Read parking lot dimensions and owner money
+    if (fread(&loadedRows, sizeof(int), 1, file) != 1 ||
+        fread(&loadedCols, sizeof(int), 1, file) != 1 ||
+        fread(&loadedMoney, sizeof(double), 1, file) != 1) {
+        fclose(file);
+        return 0; // Error reading header
+    }
+
+    // Free any existing memory if parkingLot was already initialized
+    freeParkingLot(parkingLot);
+
+    // Now, set the parkingLot dimensions based on loaded data
+    parkingLot->rows = loadedRows;
+    parkingLot->cols = loadedCols;
+    parkingLot->totalSpots = loadedRows * loadedCols;
+    parkingLot->ownerMoney = loadedMoney;
+
+    // Allocate new memory for spots based on loaded dimensions
+    parkingLot->spots = (ParkingSpot*)malloc(sizeof(ParkingSpot) * parkingLot->totalSpots);
+    if (parkingLot->spots == NULL) {
+        perror("Failed to allocate memory for parking spots during load");
+        fclose(file);
+        return 0;
+    }
+
+    // Loop through each ParkingSpot and read its members individually
+    for (int i = 0; i < parkingLot->totalSpots; i++) {
+        if (fread(&parkingLot->spots[i].id, sizeof(int), 1, file) != 1 ||
+            fread(&parkingLot->spots[i].isOccupied, sizeof(int), 1, file) != 1 ||
+            fread(&parkingLot->spots[i].entryTime, sizeof(time_t), 1, file) != 1) {
+            perror("Error reading parking spot data during load");
+            fclose(file);
+            freeParkingLot(parkingLot); // Clean up partially loaded data
+            return 0;
+        }
+    }
+
+    fclose(file);
+    return 1; // Success
+}
+
+void checkAndOfferUpgrade(ParkingLot* parkingLot) {
+    printf("\n--- Parking Lot Upgrades ---\n");
+    // 1 upgrade: 3x3 to 5x5 
+    if (parkingLot->rows == INITIAL_ROWS) { // Only offer this if current is 3x3
+        if (parkingLot->ownerMoney >= 500) {
+            printf("You have %.2f NIS. You can upgrade to a 5x5 parking lot for 500 NIS.\n", parkingLot->ownerMoney);
+            printf("Do you want to upgrade? (y/n): ");
+            char choice_char;
+            scanf_s(" %c", &choice_char, 1);
+            while (getchar() != '\n');
+            if (choice_char == 'y' || choice_char == 'Y') {
+                upgradeParkingLot(parkingLot, 5, 5, 500);
+                return;
+            }
+        }
+        else {
+            printf("You need 500 NIS to upgrade to 5x5. Current money: %.2f NIS.\n", parkingLot->ownerMoney);
+        }
+    }
+
+    // 2 upgrade: 5x5 to 7x7
+    if (parkingLot->rows == 5) { // Only offer this if current is 5x5
+        if (parkingLot->ownerMoney >= 1000) {
+            printf("You have %.2f NIS. You can upgrade to a 7x7 parking lot for 1000 NIS.\n", parkingLot->ownerMoney);
+            printf("Do you want to upgrade? (y/n): ");
+            char choice_char;
+            scanf_s(" %c", &choice_char, 1);
+            while (getchar() != '\n');
+            if (choice_char == 'y' || choice_char == 'Y') {
+                upgradeParkingLot(parkingLot, 7, 7, 1000);
+                return;
+            }
+        }
+        else {
+            printf("You need 1000 NIS to upgrade to 7x7. Current money: %.2f NIS.\n", parkingLot->ownerMoney);
+        }
+    }
+
+    // 3 upgrade: 7x7 to 10x10
+    if (parkingLot->rows == 7) { // Only offer this if current is 7x7
+        if (parkingLot->ownerMoney >= 10000) {
+            printf("You have %.2f NIS. You can upgrade to a 10x10 parking lot for 10000 NIS.\n", parkingLot->ownerMoney);
+            printf("Do you want to upgrade? (y/n): ");
+            char choice_char;
+            scanf_s(" %c", &choice_char, 1);
+            while (getchar() != '\n');
+            if (choice_char == 'y' || choice_char == 'Y') {
+                upgradeParkingLot(parkingLot, 10, 10, 10000);
+                return;
+            }
+        }
+        else {
+            printf("You need 10000 NIS to upgrade to 10x10. Current money: %.2f NIS.\n", parkingLot->ownerMoney);
+        }
+    }
+
+    printf("No further upgrades available at this time or not enough funds.\n");
+    Sleep(1500);
+}
+
+void upgradeParkingLot(ParkingLot* parkingLot, int newRows, int newCols, double upgradeCost) {
+    if (parkingLot->ownerMoney < upgradeCost) {
+        printf("Not enough funds for upgrade!\n");
+        Sleep(1000);
+        return;
+    }
+
+    int newTotalSpots = newRows * newCols;
+    ParkingSpot* newSpots = (ParkingSpot*)malloc(sizeof(ParkingSpot) * newTotalSpots);
+    if (newSpots == NULL) {
+        perror("Failed to allocate memory for new parking spots during upgrade");
+        return;
+    }
+
+    for (int i = 0; i < newTotalSpots; i++) {
+        newSpots[i].id = i + 1;
+        newSpots[i].isOccupied = 0;
+        newSpots[i].entryTime = 0;
+    }
+
+    int spotsToCopy = (parkingLot->totalSpots < newTotalSpots) ? parkingLot->totalSpots : newTotalSpots;
+    for (int i = 0; i < spotsToCopy; i++) {
+        if (parkingLot->spots[i].isOccupied) {
+            newSpots[i] = parkingLot->spots[i];
+        }
+    }
+
+    freeParkingLot(parkingLot);
+    parkingLot->spots = newSpots;
+    parkingLot->rows = newRows;
+    parkingLot->cols = newCols;
+    parkingLot->totalSpots = newTotalSpots;
+    parkingLot->ownerMoney -= upgradeCost;
+
+    printf("Parking lot successfully upgraded to %dx%d! Cost: %.2f NIS.\n", newRows, newCols, upgradeCost);
+    Sleep(2000);
+}
+
+void applyMoneyCheat(ParkingLot* parkingLot) {
+    parkingLot->ownerMoney += 5000;
+    printf("CHEAT ACTIVATED: 5000 NIS added to owner's money! New balance: %.2f NIS\n", parkingLot->ownerMoney);
+    Sleep(2000);
+}
+
+int getIntegerInput(const char* prompt) {
+    int value;
+    char buffer[100];
+
+    if (prompt && strlen(prompt) > 0) {
+        printf("%s", prompt);
+    }
+
+    if (fgets(buffer, sizeof(buffer), stdin) != NULL) {
+        buffer[strcspn(buffer, "\n")] = 0;
+        value = atoi(buffer);
+    }
+    else {
+        printf("Error reading input. Please try again.\n");
+        value = -1;
+    }
+    return value;
+}
